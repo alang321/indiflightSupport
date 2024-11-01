@@ -16,14 +16,16 @@
 # with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import pandas as pd
-from orangebox import Parser as BFLParser
 
 import logging
-import pickle
 import os
+import shutil
+import glob
 import re
 from matplotlib import pyplot as plt
-from hashlib import md5
+
+import ctypes
+from platformdirs import user_cache_dir
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,7 @@ class IndiflightLog(object):
     DSHOT_MIN = 158.
     DSHOT_MAX = 2048.
     CACHE_NAME = "indiflight_logs"
+    LIBRARY_SO = os.path.join(os.path.dirname(__file__), "blackbox_decode.cpython-310-x86_64-linux-gnu.so")
 
     @staticmethod
     def modeToText(bits):
@@ -132,47 +135,57 @@ class IndiflightLog(object):
         except TypeError:
             return single(bits)
 
-    def __init__(self, filename, timeRange=None, useCache=True):
+    def __init__(self, filename, timeRange=None, resetTime=True):
+        # setup libary
+        lib = ctypes.CDLL(self.LIBRARY_SO)
+        lib.main.argtypes = (ctypes.c_int, ctypes.POINTER(ctypes.c_char_p))
+        lib.main.restype = ctypes.c_int
+
+        # setup paths
+        cachedir = user_cache_dir(self.CACHE_NAME, self.CACHE_NAME)
+        if not os.path.exists(cachedir):
+            os.makedirs(cachedir)
+        else:
+            files = glob.glob(os.path.join(cachedir, "log*"))
+            for f in files:
+                os.remove(f)
+
+        self.cache_bfl = os.path.join(cachedir, "log.bfl")
+        self.cache_csv = os.path.join(cachedir, "log.01.csv")
+        self.cache_headers_csv = os.path.join(cachedir, "log.01.headers.csv")
+
+        # copy to cache folder
         self.filename = filename
+        shutil.copy(filename, self.cache_bfl)
 
-        if useCache:
-            self.raw, self.parameters = self._tryCacheLoad(filename)
+        # convert to csv
+        logger.info("Parsing logfile")
+        argv = [b"blackbox_decode", self.cache_bfl.encode("ascii")]
+        argc = 2
+        argv_ctypes = (ctypes.c_char_p * argc)(*argv)
+        _ = lib.main(argc, argv_ctypes)
 
-        if not useCache or self.raw is None or self.parameters is None:
-            # import raw data using orangebox parser
-            logger.info("Parsing logfile")
-            self.bfl = BFLParser.load(filename)
+        # dump data rows into pandas frame. # TODO: only import until range?
+        logger.info("Importing into dataframe")
+        self.raw = pd.read_csv(self.cache_csv, skipinitialspace=True)
+        self.raw.set_index('loopIteration', inplace=True)
 
-            if self.bfl.reader.log_count > 1:
-                raise NotImplementedError("IndiflightLog not implemented for multiple\
-                                           logs per BFL or BBL file. Use bbsplit\
-                                           cmd line util")
+        # get parameters
+        par_frame = pd.read_csv(
+            self.cache_headers_csv,
+            skiprows=13,
+            header=None,
+            usecols=[0, 1],
+            names=["parameter", "value"])
 
-            # dump data rows into pandas frame. # TODO: only import until range?
-            logger.info("Importing into dataframe")
+        self.parameters = par_frame.set_index("parameter")["value"].to_dict()
+
+        # Attempt to convert each value in the dictionary to an integer if possible
+        for key, value in self.parameters.items():
             try:
-                data = [frame.data for frame in self.bfl.frames()]
-            except (IndexError, TypeError):
-                # work around really annoying issue in orangebox
-                logger.warning("Encountered internal error, trying to append EOF to datafile")
-                with open(filename, 'ab') as file:
-                    EOF = bytes(1024) # loads of zeros
-                    EOF += b'E' + bytes.fromhex("ff") + b'End of log' + bytes.fromhex("00")
-                    file.write(EOF)
-
-                self.bfl = BFLParser.load(filename)
-                data = [frame.data for frame in self.bfl.frames()]
-                logger.warning("Recovered succesfully")
-
-            self.raw = pd.DataFrame(data, columns=self.bfl.field_names )
-            self.raw.set_index('loopIteration', inplace=True)
-
-            # get parameters
-            self.parameters = self.bfl.headers
-
-            # pickle, if requested
-            if useCache:
-                self._storeCache()
+                self.parameters[key] = int(value)
+            except ValueError:
+                pass  # Leave the value as a string if it can't be converted
 
         self.num_learner_vars = sum([
             re.match(r'^fx_p_rls_x\[[0-9]+\]$', c) is not None 
@@ -180,79 +193,43 @@ class IndiflightLog(object):
 
         # crop to time range and apply scaling
         logger.info("Apply scaling and crop to range")
-        self.data = self._processData(timeRange)
+        self.data = self._processData(timeRange, resetTime=resetTime)
 
         # parse rc box mode change events (use LogData.modeToText to decode)
         logger.info("Convert flight modes to events")
         self.flags = self._convertModeFlagsToEvents()
         logger.info("Done")
 
-    @staticmethod
-    def clearCache():
-        from platformdirs import user_cache_dir
+    def outputCsv(self, units: str, path=None):
+        # copy csv back to folder if required
+        fileStem = os.path.splitext(self.filename)[0]
+        outputPath = path if path is not None else os.path.dirname(self.filename)
 
-        cachedir = user_cache_dir(IndiflightLog.CACHE_NAME, IndiflightLog.CACHE_NAME)
+        logger.warning("Outputting converted csv.")
+        shutil.copy(self.cache_headers_csv,
+            os.path.join(outputPath, fileStem+".01.headers.csv"))
 
-        logger.info(f"Clearing cache at {cachedir}")
-        try:
-            for file_name in os.listdir(cachedir):
-                os.remove(os.path.join(cachedir, file_name))
-        except FileNotFoundError:
-            pass
+        if units.lower() == "raw":
+            shutil.copy(self.cache_csv, 
+                os.path.join(outputPath, fileStem+".01.raw.csv"))
+        elif units.lower() == "si":
+            self.data.to_csv(
+                os.path.join(outputPath, fileStem+".01.si.csv"),
+                #float_format="%.8e", # output with float precision, not double. this made the file even more huge
+                index=True
+                )
+        else:
+            raise ValueError("outputCsv: units must be either 'raw' or 'si'")
 
     def crop(self, start, stop):
         timeS = self.data['timeS']
         boolarr = (timeS >= start) & (timeS <= stop)
         return self.data[boolarr], timeS[boolarr].to_numpy()
 
-    def _tryCacheLoad(self, filename):
-        from platformdirs import user_cache_dir
+    def _processData(self, timeRange, resetTime=True):
+        t0 = self.raw['time'].iloc[0] if resetTime else 0
 
-        cachedir = user_cache_dir(self.CACHE_NAME, self.CACHE_NAME)
-        if not os.path.exists(cachedir):
-            os.makedirs(cachedir)
-
-        BUF_SIZE = 65536 # chunksize
-
-        # idea: filename is md5 digest of both the log and this file. That 
-        #       should prevent reading any stale/corrupt cache
-        hash = md5()
-        with open(filename, 'rb') as f:
-            while True:
-                data = f.read(BUF_SIZE)
-                if not data:
-                    break
-                hash.update(data)
-        with open(__file__, 'rb') as f:
-            while True:
-                data = f.read(BUF_SIZE)
-                if not data:
-                    break
-                hash.update(data)
-
-        cacheFileStem=hash.hexdigest()
-
-        # Join the folder path with the filename to get the complete file path
-        self.cacheFilePath = os.path.join(cachedir, cacheFileStem+'.pkl')
-        if os.path.exists(self.cacheFilePath):
-            logger.info(f"Using cached pickle in {cachedir} instead of reading BFL log for {filename}")
-            with open(self.cacheFilePath, 'rb') as f:
-                raw, parameters = pickle.load(f)
-            return raw, parameters
-        else:
-            logger.info(f"No cached pickle found in {cachedir} for {filename}")
-            return None, None
-
-    def _storeCache(self):
-        # to get here, tryCacheLoad has to have been called
-        logger.info("Caching raw logs to pickle")
-        logger.debug(f"Cache pickle location: {self.cacheFilePath}")
-        with open(self.cacheFilePath, 'wb') as f:
-            pickle.dump((self.raw, self.parameters), f)
-
-    def _processData(self, timeRange):
         # crop relevant time range out of raw, and adjust time
-        t0 = self.raw['time'].iloc[0]
         if timeRange is not None:
             data = self.raw[ ( (self.raw['time'] - t0) > timeRange[0]*1e3 )
                         & ( (self.raw['time'] - t0) <= timeRange[1]*1e3) ].copy(deep=True)
@@ -262,8 +239,10 @@ class IndiflightLog(object):
         self.N = len(data)
 
         # manage time in s, ms and us
-        data['time'] -= t0
-        data.rename(columns={'time':'timeUs'}, inplace=True)
+        if resetTime:
+            data['time'] -= self.raw['time'].iloc[0]
+
+        data['timeUs'] = data['time'].copy(deep=True)
         timeUs = data['timeUs'].to_numpy()
         data['timeMs'] = 1e-3 * timeUs
         data['timeS'] = 1e-6 * timeUs
@@ -393,6 +372,10 @@ class IndiflightLog(object):
                                 'timeUs': int(row['timeUs']),
                                 "enable": e, 
                                 "disable": d})
+
+        if (len(flags) == 0):
+            df = pd.DataFrame(columns=["loopIteration", "timeUs", "enable", "disable"])
+            return df
 
         df = pd.DataFrame(flags)
         df.set_index('loopIteration', inplace=True)
