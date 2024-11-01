@@ -220,6 +220,115 @@ class IndiflightLog(object):
                 )
         else:
             raise ValueError("outputCsv: units must be either 'raw' or 'si'")
+        
+    def outputRosbag(self):
+        from sensor_msgs.msg import Imu, NavSatFix
+        from geometry_msgs.msg import PoseStamped
+        import rosbag2_py
+        from rclpy.serialization import serialize_message
+        from builtin_interfaces.msg import Time
+
+        def to_ros_time(timestamp):
+            """Helper to convert a timestamp to ROS 2 Time message"""
+            sec = int(timestamp)
+            nanosec = int((timestamp - sec) * 1e9)
+            ros_time = Time()
+            ros_time.sec = sec
+            ros_time.nanosec = nanosec
+            return ros_time
+
+        # Initialize rosbag2 writer
+        writer = rosbag2_py.SequentialWriter()
+        writer.open(
+            rosbag2_py.StorageOptions(uri="output.mcap", storage_id="mcap"),
+            rosbag2_py.ConverterOptions(
+                input_serialization_format="cdr", output_serialization_format="cdr"
+            ),
+        )
+
+        # Create topics and their types
+        writer.create_topic( rosbag2_py.TopicMetadata( name="/imu", type="sensor_msgs/Imu", serialization_format="cdr") )
+        writer.create_topic( rosbag2_py.TopicMetadata( name="/pose", type="geometry_msgs/PoseStamped", serialization_format="cdr") )
+        #writer.create_topic({'name': '/gps', 'type': 'sensor_msgs/NavSatFix', 'serialization_format': 'cdr'})
+
+        # Iterate over each row in the DataFrame
+        for index, row in self.data.iterrows():
+            # Convert timestamp to ROS Time
+            timestamp = to_ros_time(row['timeS'])
+
+            # Populate IMU message
+            imu_msg = Imu()
+            imu_msg.header.stamp = timestamp
+            # Example data for IMU, replace with your actual columns
+            imu_msg.angular_velocity.x = row['gyroADCafterRpm[0]']
+            imu_msg.angular_velocity.y = row['gyroADCafterRpm[1]']
+            imu_msg.angular_velocity.z = row['gyroADCafterRpm[2]']
+            writer.write('/imu', serialize_message(imu_msg), timestamp.sec * 1_000_000_000 + timestamp.nanosec)
+
+            pose_msg = PoseStamped()
+            pose_msg.header.stamp = timestamp
+            pose_msg.header.frame_id = "map"
+            pose_msg.pose.position.x = row['ekf_pos[0]']
+            pose_msg.pose.position.y = row['ekf_pos[1]']
+            pose_msg.pose.position.z = row['ekf_pos[2]']
+            pose_msg.pose.orientation.w = row['ekf_quat[0]']
+            pose_msg.pose.orientation.x = row['ekf_quat[1]']
+            pose_msg.pose.orientation.y = row['ekf_quat[2]']
+            pose_msg.pose.orientation.z = row['ekf_quat[3]']
+            writer.write('/pose', serialize_message(pose_msg), timestamp.sec * 1_000_000_000 + timestamp.nanosec)
+
+        print("Finished writing to ROS 2 bag file.")
+        del writer
+
+    def addToRerun(self):
+        import rerun as rr
+        import numpy as np
+        timeS = self.data["timeS"].to_numpy()
+        getValues = lambda s, ir: self.data[[f"{s}[{i}]" for i in ir]].to_numpy().flatten()
+        getPart = lambda i: [i for _ in range(self.N)]
+        getManyOf = lambda x: np.ones(self.N)*x
+
+        point3 = [("ekf_pos", True)]
+        arrow3 = [("ekf_vel", "ekf_pos", 0.2)]
+        pose = [("ekf_pos", "ekf_quat")]
+        scalar = [("motor", 4)]
+        for p, trace in point3:
+            rr.send_columns(
+                f"fc/{p}",
+                times=[rr.TimeSecondsColumn("time", timeS)],
+                components=[ rr.Points3D.indicator(),
+                             rr.components.Position3DBatch( getValues(p, range(3)) ).partition(getPart(1)),
+                             rr.components.RadiusBatch( getManyOf(0.1) ) ]
+                )
+            if trace:
+                rr.log(
+                    f"fc/{p}/trace",
+                    rr.Points3D( getValues(p, range(3)), radii=0.01 ),
+                    timeless=True
+                )
+
+        for vec, orig, scale in arrow3:
+            rr.send_columns(
+                f"fc/{vec}",
+                times=[rr.TimeSecondsColumn("time", timeS)],
+                components=[ rr.Arrows3D.indicator(),
+                             rr.components.Vector3DBatch( scale*getValues(vec, range(3)) ).partition(getPart(1)),
+                             rr.components.Position3DBatch( getValues(orig, range(3)) ).partition(getPart(1)),
+                             rr.components.RadiusBatch( getManyOf(0.025) ) ]
+                )
+
+        for p, q in pose:
+            rr.send_columns(
+                f"fc/{q}",
+                times=[rr.TimeSecondsColumn("time", timeS)],
+                components=[ rr.Transform3D.indicator(),
+                             rr.components.Translation3DBatch( getValues(p, range(3)) ).partition(getPart(1)),
+                             rr.components.RotationQuatBatch( getValues(q, [1,2,3,0]) ).partition(getPart(1)), # reverse quaternin component order
+                             rr.components.AxisLengthBatch( getManyOf(0.5) )
+                ]
+            )
+
+        rr.log("fc", rr.ViewCoordinates.FRD, static=True)
 
     def crop(self, start, stop):
         timeS = self.data['timeS']
