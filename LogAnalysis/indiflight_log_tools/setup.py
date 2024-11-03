@@ -44,5 +44,8 @@ setup(
         "platformdirs >=4.2.2",
         "scipy >=1.14.0",
     ],
-    scripts=["bin/bfl2csv"]
+    scripts=[
+        "bin/bfl2csv",
+        "bin/bfl2rerun",
+    ]
 )

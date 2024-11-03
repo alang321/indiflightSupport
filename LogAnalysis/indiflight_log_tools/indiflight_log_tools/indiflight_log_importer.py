@@ -22,6 +22,7 @@ import os
 import shutil
 import glob
 import re
+import numpy as np
 from matplotlib import pyplot as plt
 
 import ctypes
@@ -280,36 +281,77 @@ class IndiflightLog(object):
         print("Finished writing to ROS 2 bag file.")
         del writer
 
-    def addToRerun(self):
+    def addToRerun(self, name: str, clockOffsetSeconds=0.):
         import rerun as rr
-        import numpy as np
-        timeS = self.data["timeS"].to_numpy()
+        timeS = self.data["timeS"].to_numpy() + clockOffsetSeconds
         getValues = lambda s, ir: self.data[[f"{s}[{i}]" for i in ir]].to_numpy().flatten()
         getPart = lambda i: [i for _ in range(self.N)]
         getManyOf = lambda x: np.ones(self.N)*x
 
-        point3 = [("ekf_pos", True)]
+        point3 = [
+            ("ekf_pos", True, 0.005),
+            ("extPos", True, 0.01),
+        ]
         arrow3 = [("ekf_vel", "ekf_pos", 0.2)]
-        pose = [("ekf_pos", "ekf_quat")]
-        scalar = [("motor", 4)]
-        for p, trace in point3:
+        pose = [
+            ("ekf_pos", "ekf_quat"),
+            ("extPos", "extQuat"),
+            ("posSp", "quatSp"),
+        ]
+        scalar = [
+            ("rcCommand", range(4)),
+            ("vbatLatest", -1),
+            ("amperageLatest", -1),
+            ("gyroSp", range(3)),
+            ("gyroADCafterRpm", range(3)),
+            ("gyroADC", range(3)),
+            ("alphaSp", range(3)),
+            ("alpha", range(3)),
+            ("spfSp", range(3)),
+            ("accADCafterRpm", range(3)),
+            ("accSmooth", range(3)),
+            ("dv", range(6)),
+            ("u", range(4)),
+            ("u_state", range(4)),
+            ("motor", range(4)),
+            ("omega", range(4)),
+            ("omegaUnfiltered", range(4)),
+            ("omega_dot", range(4)),
+            ("extTime", -1),
+            ("posSp", range(3)),
+            ("pos", range(3)),
+            ("velSp", range(3)),
+            ("vel", range(3)),
+            ("accSp", range(3)),
+            ("extPos", range(3)),
+            ("extVel", range(3)),
+            ("extQuat", range(4)),
+            ("ekf_pos", range(3)),
+            ("ekf_vel", range(3)),
+            ("ekf_quat", range(4)),
+            ("ekf_acc_b", range(3)),
+            ("ekf_gyro_b", range(3)),
+            ("flightModeFlags", -1),
+        ]
+
+        for p, trace, r in point3:
             rr.send_columns(
-                f"fc/{p}",
+                f"{name}/{p}",
                 times=[rr.TimeSecondsColumn("time", timeS)],
                 components=[ rr.Points3D.indicator(),
                              rr.components.Position3DBatch( getValues(p, range(3)) ).partition(getPart(1)),
-                             rr.components.RadiusBatch( getManyOf(0.1) ) ]
+                             rr.components.RadiusBatch( getManyOf(0.075) ) ]
                 )
             if trace:
                 rr.log(
-                    f"fc/{p}/trace",
-                    rr.Points3D( getValues(p, range(3)), radii=0.01 ),
+                    f"{name}/{p}/trace",
+                    rr.Points3D( getValues(p, range(3)), radii=r ),
                     timeless=True
                 )
 
         for vec, orig, scale in arrow3:
             rr.send_columns(
-                f"fc/{vec}",
+                f"{name}/{vec}",
                 times=[rr.TimeSecondsColumn("time", timeS)],
                 components=[ rr.Arrows3D.indicator(),
                              rr.components.Vector3DBatch( scale*getValues(vec, range(3)) ).partition(getPart(1)),
@@ -319,16 +361,30 @@ class IndiflightLog(object):
 
         for p, q in pose:
             rr.send_columns(
-                f"fc/{q}",
+                f"{name}/{q}",
                 times=[rr.TimeSecondsColumn("time", timeS)],
                 components=[ rr.Transform3D.indicator(),
                              rr.components.Translation3DBatch( getValues(p, range(3)) ).partition(getPart(1)),
                              rr.components.RotationQuatBatch( getValues(q, [1,2,3,0]) ).partition(getPart(1)), # reverse quaternin component order
-                             rr.components.AxisLengthBatch( getManyOf(0.5) )
-                ]
+                             rr.components.AxisLengthBatch( getManyOf(0.5) ) ]
             )
 
-        rr.log("fc", rr.ViewCoordinates.FRD, static=True)
+        for s, ir in scalar:
+            try:
+                for i in ir:
+                    rr.send_columns(
+                        f"{name}/scalars/{s}/{i}",
+                        times=[rr.TimeSecondsColumn("time", timeS)],
+                        components=[ rr.components.ScalarBatch( getValues(s, [i]) ) ],
+                    )
+            except TypeError:
+                rr.send_columns(
+                    f"{name}/scalars/{s}",
+                    times=[rr.TimeSecondsColumn("time", timeS)],
+                    components=[ rr.components.ScalarBatch( self.data[s] ) ],
+                )
+
+        rr.log(name, rr.ViewCoordinates.FRD, static=True)
 
     def crop(self, start, stop):
         timeS = self.data['timeS']

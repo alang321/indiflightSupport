@@ -40,5 +40,17 @@ log.raw                                                                         
 log.data                                                                          # pandas dataframe in SI units
 log.modeToText(log.data["flightModeFlags"])                                       # convert flight mode flag(s) into human-readable format
 log.flags                                                                         # flight mode changes with timestamp
-[(t, log.modeToText(x), log.modeToText(y)) for t, x, y in zip(log.flags["timeUs"], log.flags["enable"], log.flags["disable"])]  # flight mode changes in human readable format
+[(t, log.modeToText(x), log.modeToText(y)) for t, x, y in zip(log.flags["timeUs"], log.flags["enable"], log.flags["disable"])] # flight mode changes in human readable format
+
+log.outputCsv("raw")                                                              # output raw data as csv, comparable to outputting from BB log explorer
+log.outputCsv("si")                                                               # output SI data as csv
+log.outputCsv("si", path="my/path/for/logOutput/")                                # output SI data into a specific path
+
+log.addToRerun(name="BFL", clockOffsetSeconds=0.)                                 # send data Rerun (does not do init, connect, etc. just adding data)
+```
+
+There are also command line tools you can use after installing the wheel:
+```
+$ bfl2csv --help     # shorthand for the log.outputCsv() above
+$ bfl2rerun --help   # shorthand for the log.addToRerun() above
 ```
