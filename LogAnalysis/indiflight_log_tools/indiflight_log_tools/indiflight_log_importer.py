@@ -153,6 +153,7 @@ class IndiflightLog(object):
 
         self.cache_bfl = os.path.join(cachedir, "log.bfl")
         self.cache_csv = os.path.join(cachedir, "log.01.csv")
+        self.cache_events = os.path.join(cachedir, "log.01.event")
         self.cache_headers_csv = os.path.join(cachedir, "log.01.headers.csv")
 
         # copy to cache folder
@@ -181,6 +182,11 @@ class IndiflightLog(object):
 
         self.parameters = par_frame.set_index("parameter")["value"].to_dict()
 
+        # get events
+        import json
+        with open(self.cache_events, 'r') as file:
+            self.events = [json.loads(line) for line in file]
+
         # Attempt to convert each value in the dictionary to an integer if possible
         for key, value in self.parameters.items():
             try:
@@ -207,8 +213,12 @@ class IndiflightLog(object):
         outputPath = path if path is not None else os.path.dirname(self.filename)
 
         logger.warning("Outputting converted csv.")
+
+        # always just copy headers and events
         shutil.copy(self.cache_headers_csv,
             os.path.join(outputPath, fileStem+".01.headers.csv"))
+        shutil.copy(self.cache_events,
+            os.path.join(outputPath, fileStem+".01.event"))
 
         if units.lower() == "raw":
             shutil.copy(self.cache_csv, 
@@ -283,22 +293,21 @@ class IndiflightLog(object):
 
     def addToRerun(self, name: str, clockOffsetSeconds=0.):
         import rerun as rr
-        timeS = self.data["timeS"].to_numpy() + clockOffsetSeconds
-        getValues = lambda s, ir: self.data[[f"{s}[{i}]" for i in ir]].to_numpy().flatten()
-        getPart = lambda i: [i for _ in range(self.N)]
-        getManyOf = lambda x: np.ones(self.N)*x
 
-        point3 = [
+        # define elements to log
+        point3 = [ # in 3D view: (column, showTraceAsWell, markerSize)
             ("ekf_pos", True, 0.005),
             ("extPos", True, 0.01),
         ]
-        arrow3 = [("ekf_vel", "ekf_pos", 0.2)]
-        pose = [
+        arrow3 = [ # vectors: (direction, origin, lengthScaler)
+            ("ekf_vel", "ekf_pos", 0.2)
+        ]
+        pose = [ # show a triad to indicate pose (origin, rotationQuaternion)
             ("ekf_pos", "ekf_quat"),
             ("extPos", "extQuat"),
             ("posSp", "quatSp"),
         ]
-        scalar = [
+        timeseries = [ # just time series: (column, indices_or_minus_one)
             ("rcCommand", range(4)),
             ("vbatLatest", -1),
             ("amperageLatest", -1),
@@ -334,6 +343,16 @@ class IndiflightLog(object):
             ("flightModeFlags", -1),
         ]
 
+        # prepare arrays and lambdas
+        timeS = self.data["timeS"].to_numpy() + clockOffsetSeconds
+        getValues = lambda s, ir: self.data[[f"{s}[{i}]" for i in ir]].to_numpy().flatten()
+        getPart = lambda i: [i for _ in range(self.N)]
+        getManyOf = lambda x: np.ones(self.N)*x
+
+        # get axis system correct
+        rr.log(name, rr.ViewCoordinates.FRD, static=True)
+
+        # log positions
         for p, trace, r in point3:
             rr.send_columns(
                 f"{name}/{p}",
@@ -349,6 +368,7 @@ class IndiflightLog(object):
                     timeless=True
                 )
 
+        # log vectors
         for vec, orig, scale in arrow3:
             rr.send_columns(
                 f"{name}/{vec}",
@@ -359,6 +379,7 @@ class IndiflightLog(object):
                              rr.components.RadiusBatch( getManyOf(0.025) ) ]
                 )
 
+        # log axes triads
         for p, q in pose:
             rr.send_columns(
                 f"{name}/{q}",
@@ -369,22 +390,46 @@ class IndiflightLog(object):
                              rr.components.AxisLengthBatch( getManyOf(0.5) ) ]
             )
 
-        for s, ir in scalar:
+        # log scalar timeseries
+        for s, ir in timeseries:
             try:
                 for i in ir:
                     rr.send_columns(
-                        f"{name}/scalars/{s}/{i}",
+                        f"{name}/timeseries/{s}/{i}",
                         times=[rr.TimeSecondsColumn("time", timeS)],
                         components=[ rr.components.ScalarBatch( getValues(s, [i]) ) ],
                     )
             except TypeError:
                 rr.send_columns(
-                    f"{name}/scalars/{s}",
+                    f"{name}/timeseries/{s}",
                     times=[rr.TimeSecondsColumn("time", timeS)],
                     components=[ rr.components.ScalarBatch( self.data[s] ) ],
                 )
 
-        rr.log(name, rr.ViewCoordinates.FRD, static=True)
+        # log flight mode changes (must be last)
+        for _, row in self.flags.iterrows():
+            time = row["timeUs"] * 1e-6 + clockOffsetSeconds
+            enable = IndiflightLog.modeToText(row["enable"])
+            disable = IndiflightLog.modeToText(row["disable"])
+
+            rr.set_time_seconds("time", time)
+            rr.log(
+                f"{name}/events",
+                rr.TextLog(f"[IndiflightLog] FC Time {time:.3f}: Enabled flight modes {enable}, Disabled flight modes {disable}",
+                           level=rr.TextLogLevel.INFO)
+            )
+
+        # log other events
+        for event in self.events:
+            time = event['time'] * 1e-6 + clockOffsetSeconds
+            msg = event['name']
+
+            rr.set_time_seconds("time", time)
+            rr.log(
+                f"{name}/events",
+                rr.TextLog(f"[IndiflightLog] FC Time {time:.3f}: Received event: {msg}",
+                           level=rr.TextLogLevel.WARN)
+            )
 
     def crop(self, start, stop):
         timeS = self.data['timeS']
