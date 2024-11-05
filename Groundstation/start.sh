@@ -49,16 +49,20 @@ echo_help_and_exit() {
 }
 
 # check for arguments
-if [[ $# -gt 2 ]] || [[ $# -lt 1 ]]; then
+if [[ $# -gt 3 ]] || [[ $# -lt 1 ]]; then
     echo_help_and_exit
 fi
 
+MOCAP="optitrack"
+MOCAP_IP=
 while test $# != 0
 do
     left=$(echo "$1" | cut -d "=" -f 1)
     right=$(echo "$1" | cut -d "=" -f 2-)
     case "$left" in
     --test) TEST_FLAG=--test ;;
+    --mocap) MOCAP=$right ;;
+    --mocap-ip) MOCAP_IP=$right ;;
     --help) echo_help_and_exit ;;
     -h) echo_help_and_exit ;;
     *) RB_ID=$left ;;
@@ -106,7 +110,16 @@ tmux send-keys -t $session:0.3 "$ON_REMOTE /home/${REMOTE_USER}/relay/build-aarc
 
 # start natnet2udp.py in udp mode
 #tmux send-keys -t $session:0.0 "./optitrack_forwarder/build/natnet2udp.py -ac $RB_ID 0 -f 20 -le right -an far -xs right -up z_up -udp $TEST_FLAG" ENTER
-tmux send-keys -t $session:0.0 "./UnifiedOptitrackClients/build/mocap2udp -s $RB_ID --ac 0 -f 20 -i $REMOTE_IP -p 5005 -c NED $TEST_FLAG" ENTER
+#tmux send-keys -t $session:0.0 "./UnifiedOptitrackClients/build/mocap2udp -s $RB_ID --ac 0 -f 20 -i $REMOTE_IP -p 5005 -c NED $TEST_FLAG" ENTER
+if [ ! -z "$TEST_FLAG" ]; then
+    tmux send-keys -t $session:0.0 "./UnifiedOptitrackClients/build/client test udp -s $RB_ID -d 1 -f 20 -c NED -r far_side -n far_side -i $REMOTE_IP -p 5005 --test_freq 2"  ENTER
+else
+    if [ "$MOCAP" = "qualisys_sdk" ]; then
+        tmux send-keys -t $session:0.0 "./UnifiedOptitrackClients/build/client qualisys_sdk udp --streaming_names $RB_ID -d 14 -f 20 -c NED -r near_side -n near_side --mocap_ip $MOCAP_IP -i $REMOTE_IP -p 5005" ENTER
+    else
+        tmux send-keys -t $session:0.0 "./UnifiedOptitrackClients/build/client $MOCAP udp -s $RB_ID -d 10 -f 20 -c NED -r far_side -n far_side -i $REMOTE_IP -p 5005" ENTER
+    fi
+fi
 
 # setpoints
 tmux send-keys -t $session:0.1 "/usr/bin/env python3 setpointSender.py --host $REMOTE_IP --pos 0 0 -1.0 --yaw 0"
