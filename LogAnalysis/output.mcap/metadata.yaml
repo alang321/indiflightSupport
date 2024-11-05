@@ -1,0 +1,32 @@
+rosbag2_bagfile_information:
+  version: 5
+  storage_identifier: mcap
+  duration:
+    nanoseconds: 41145576001
+  starting_time:
+    nanoseconds_since_epoch: 123081761999
+  message_count: 41380
+  topics_with_message_count:
+    - topic_metadata:
+        name: /pose
+        type: geometry_msgs/PoseStamped
+        serialization_format: cdr
+        offered_qos_profiles: ""
+      message_count: 20690
+    - topic_metadata:
+        name: /imu
+        type: sensor_msgs/Imu
+        serialization_format: cdr
+        offered_qos_profiles: ""
+      message_count: 20690
+  compression_format: ""
+  compression_mode: ""
+  relative_file_paths:
+    - output.mcap_0.mcap
+  files:
+    - path: output.mcap_0.mcap
+      starting_time:
+        nanoseconds_since_epoch: 123081761999
+      duration:
+        nanoseconds: 41145576001
+      message_count: 41380

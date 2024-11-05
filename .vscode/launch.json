@@ -5,6 +5,30 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "Debug blackbox-tools",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/LogAnalysis/indiflight_log_tools/indiflight_log_tools/blackbox-tools/obj/blackbox_decode",
+            "args": ["~/btfl_002.bbl"],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Set Disassembly Flavor to Intel",
+                    "text": "-gdb-set disassembly-flavor intel",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
             "name": "Python Debugger: Parsing Logfile",
             "type": "debugpy",
             "request": "launch",

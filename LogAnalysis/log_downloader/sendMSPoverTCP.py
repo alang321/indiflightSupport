@@ -38,7 +38,10 @@ MSP_DIRECTION_TO_FC = b'<'
 
 def MSP_send(sock, command, data, packing):
     size = len(data)
-    data_packed = struct.pack('<'+packing, *data)
+    if (size):
+        data_packed = struct.pack('<'+packing, *data)
+    else:
+        data_packed = b""
 
     crc = size ^ command
     for val in data_packed:
@@ -60,8 +63,8 @@ if __name__=="__main__":
     #parser.add_argument("-D", "--dev", required=False, help="MSP device") # not implemented
 
     parser.add_argument("command", help="Command ID in decimal", type=int)
-    parser.add_argument("packing", help="Data format used in struct.pack", type=str)
-    parser.add_argument("data", nargs='+', help="Data separated by spaces", type=int)
+    parser.add_argument("packing", nargs='?', help="Data format used in struct.pack", type=str)
+    parser.add_argument("data", nargs='*', help="Data separated by spaces", type=int)
 
     args = parser.parse_args()
 
