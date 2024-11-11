@@ -430,6 +430,89 @@ def load_flight_data(file_name, new_format=True):
         # data['awz_sp_rec_test'] = a_world_sp_rec_test[:, 2]
         
         return data
+    
+
+
+def fit_thrust_drag_model_extended(data, subtract_ekf_bias=True):
+    print('fitting thrust and drag model')
+    fig, axs = plt.subplots(1, 3, figsize=(10, 10), sharex=True, sharey=True)
+    
+
+    X = np.stack([
+        data['omega[0]']**2 + data['omega[1]']**2 + data['omega[2]']**2 + data['omega[3]']**2,
+        data['vbx']**2 + data['vby']**2,
+        data['vbz'] *(data['omega[0]']+data['omega[1]']+data['omega[2]']+data['omega[3]']), 
+    ])
+    Y = data['az']
+    if subtract_ekf_bias:
+        Y = data['az'] - data['ekf_acc_b_z']
+    k_omega, k_h, k_z = A = np.linalg.lstsq(X.T, Y, rcond=None)[0]
+
+    
+    if 'az_unfiltered' in data:
+        axs[0].plot(data['t'], data['az_unfiltered'], label='az raw', alpha=0.1, color='blue')
+    axs[0].plot(data['t'], Y, label='az') #, alpha=0.2)
+    # axs[0].plot(data['t'], data['az_filt'], label='az filt')
+    axs[0].plot(data['t'], A@X, label='T model')
+    # axs[0].plot(data['t'], A_nom@X, label='T model nominal')
+    axs[0].set_xlabel('t [s]')
+    axs[0].set_ylabel('acc [m/s^2]')
+    axs[0].legend()
+    axs[0].set_title('Thrust model: \n az = k_omega*sum(omega_i**2) \n k_omega = {:.2e}'.format(k_omega))
+    # axs[0].set_title('Thrust model: \n az = k_omega*sum(omega_i**2) + k_h*(vbx**2+vby**2) + k_z*vbz*sum(omega_i) \n k_omega, k_h, k_z = {:.2e}, {:.2e}, {:.2e}'.format(k_omega, k_h, k_z))
+    
+    # DRAG MODEL X ------------------------------------------------------------------------------
+    # Eq. 2 from https://doi.org/10.1016/j.robot.2023.104588
+    #ax = -k_x*vbx*sum(omega_i)
+    #we will find k_x by linear regression
+    X = np.stack([data['vbx']*(data['omega[0]']+data['omega[1]']+data['omega[2]']+data['omega[3]'])])
+    # X = np.stack([data['vbx']])
+    Y = data['ax']
+    if subtract_ekf_bias:
+        Y = data['ax'] - data['ekf_acc_b_x']
+    k_x, = A = np.linalg.lstsq(X.T, Y, rcond=None)[0]
+
+
+    if 'ax_unfiltered' in data:
+        axs[1].plot(data['t'], data['ax_unfiltered'], label='ax raw', alpha=0.1, color='blue')
+    axs[1].plot(data['t'], Y, label='ax') #, alpha=0.2)
+    # axs[1].plot(data['t'], data['ax_filt'], label='ax filt')
+    axs[1].plot(data['t'], A@X, label='Dx model')
+    # axs[1].plot(data['t'], A_nom@X, label='Dx model nominal')
+    axs[1].set_xlabel('t [s]')
+    axs[1].set_ylabel('acc [m/s^2]')
+    axs[1].legend()
+    #axs[1].set_title('Drag model X: \n ax = k_x*vbx*sum(omega_i) \n k_x = {:.2e}'.format(k_x))
+    
+    # DRAG MODEL Y ------------------------------------------------------------------------------
+    # Eq. 2 from https://doi.org/10.1016/j.robot.2023.104588
+    # ay = -k_y*vby*sum(omega_i)
+    # we will find k_y by linear regression
+    X = np.stack([data['vby']*(data['omega[0]']+data['omega[1]']+data['omega[2]']+data['omega[3]'])])
+    # X = np.stack([data['vby']])
+    Y = data['ay']
+    if subtract_ekf_bias:
+        Y = data['ay'] - data['ekf_acc_b_y']
+    k_y, = A = np.linalg.lstsq(X.T, Y, rcond=None)[0]
+    
+    if 'ay_unfiltered' in data:
+        axs[2].plot(data['t'], data['ay_unfiltered'], label='ay raw', alpha=0.1, color='blue')
+    axs[2].plot(data['t'], Y, label='ay') #, alpha=0.2)
+    # axs[2].plot(data['t'], data['ay_filt'], label='ay filt')
+    axs[2].plot(data['t'], A@X, label='Dy model')
+    # axs[2].plot(data['t'], A_nom@X, label='Dy model nominal')
+    axs[2].set_xlabel('t [s]')
+    axs[2].set_ylabel('acc [m/s^2]')
+    axs[2].legend()
+    axs[2].set_title('Drag model Y: \n ay = k_y*vby*sum(omega_i) \n k_y = {:.2e}'.format(k_y))
+    
+    # show fig with the window name 'Thrust and Drag Model'
+    manager = plt.get_current_fig_manager()
+    manager.set_window_title('Thrust and Drag Model')
+    plt.show()
+    
+    # print('k_omega = {:.2e}, k_x = {:.2e}, k_y = {:.2e}'.format(k_omega, k_x, k_y))
+    return  k_x, k_y, k_omega, k_h, k_z
 
 # DATA TRIM FUNCTIONS
 def trim_nn_active(data):
