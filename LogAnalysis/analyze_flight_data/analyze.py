@@ -661,7 +661,7 @@ def animate_data2(data):
     )
     
 # FUNCTIONS FOR SYSTEM IDENTIFICATION
-def fit_thrust_drag_model(data, subtract_ekf_bias=True):
+def fit_thrust_drag_model(data, subtract_ekf_bias=True, indiflight_convention=False):
     print('fitting thrust and drag model')
     fig, axs = plt.subplots(1, 3, figsize=(10, 10), sharex=True, sharey=True)
     
@@ -761,7 +761,7 @@ def fit_thrust_drag_model(data, subtract_ekf_bias=True):
 
 from scipy.optimize import minimize
 
-def fit_actuator_model(data):
+def fit_actuator_model(data, indiflight_convention=False):
     # the steadystate rpm motor response to the motor command u is described by:
     # w_c = (w_max-w_min)*sqrt(k u**2 + (1-k)*u) + w_min
     # the dynamics of the motor is described by:
@@ -864,7 +864,7 @@ def fit_actuator_model(data):
     # print('w_min={:.2f}, w_max={:.2f}, k={:.2f}, tau={:.2f}'.format(*res_tot.x))
     return res_tot.x
 
-def fit_moments_model(data):
+def fit_moments_model(data, indiflight_convention=False):
     print('fitting moments model')
     # model from https://doi.org/10.1016/j.robot.2023.104588
     # d_p     = (q*r*(Iyy-Izz) + Mx)/Ixx = Jx*q*r + Mx_
@@ -943,16 +943,21 @@ def fit_moments_model(data):
     # k_r1, k_r2, k_r3, k_r4, k_r5, k_r6, k_r7, k_r8 = A
     # dr_fit = A@X
     
-    X = np.stack([
-        -data['omega[0]']+data['omega[1]']+data['omega[2]']-data['omega[3]'],
-        -domega_1+domega_2+domega_3-domega_4,
-    ])
+    if indiflight_convention:
+        X = np.stack([
+            -data['omega[0]']**2+data['omega[1]']**2+data['omega[2]']**2-data['omega[3]']**2,
+            -domega_1+domega_2+domega_3-domega_4,
+        ])
+    else:
+        X = np.stack([
+            -data['omega[0]']+data['omega[1]']+data['omega[2]']-data['omega[3]'],
+            -domega_1+domega_2+domega_3-domega_4,
+        ])
     Y = dr
     A = np.linalg.lstsq(X.T, Y, rcond=None)[0]
     k_r, k_rd = A
     dr_fit = A@X
 
-     
     axs[2,0].plot(data['t'], Y, label='dr')
     # axs[2,0].plot(data['t'], dr_fit, label='dr fit')
     axs[2,0].plot(data['t'], dr_fit, label='dr fit')
@@ -960,7 +965,10 @@ def fit_moments_model(data):
     axs[2,0].set_ylabel('dr [rad/s^2]')
     axs[2,0].legend()
     # title = 'dr = k_r1*w1 + k_r2*w2 + k_r3*w3 + k_r4*w4 + k_r5*dw1 + k_r6*dw2 + k_r7*dw3 + k_r8*dw4 \n k_r1, k_r2, k_r3, k_r4, k_r5, k_r6, k_r7, k_r8 = {:.2e}, {:.2e}, {:.2e}, {:.2e}, {:.2e}, {:.2e}, {:.2e}, {:.2e}'.format(*A)
-    title = 'dr = k_r*(w1-w2+w3-w4) + k_rd*(dw1-dw2+dw3-dw4) \n k_r, k_rd = {:.2e}, {:.2e}'.format(*A)
+    if (indiflight_convention):
+        title = 'dr = k_r*(w1**2-w2**2+w3**2-w4**2) + k_rd*(dw1-dw2+dw3-dw4) \n k_r, k_rd = {:.2e}, {:.2e}'.format(*A)
+    else:
+        title = 'dr = k_r*(w1-w2+w3-w4) + k_rd*(dw1-dw2+dw3-dw4) \n k_r, k_rd = {:.2e}, {:.2e}'.format(*A)
     axs[2,0].set_title(title)
     
     # 3 plots with p,q,r
