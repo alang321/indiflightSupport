@@ -157,8 +157,8 @@ else
     exit_code=1
 fi
 
-# always unmount
-sshpass -p $REMOTE_PASSWORD ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 $REMOTE_USER@$REMOTE_IP "sudo umount ${REMOTE_MOUNTPOINT}"
+# always and eject
+sshpass -p $REMOTE_PASSWORD ssh -o StrictHostKeyChecking=no -o ConnectTimeout=3 $REMOTE_USER@$REMOTE_IP "sudo umount ${REMOTE_MOUNTPOINT}; sudo eject ${REMOTE_MOUNTPOINT}"
 
 # always reset
 echo "Resetting FC..."
