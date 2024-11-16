@@ -33,6 +33,7 @@ If no error, then it should have worked!
 ```
 from indiflight_log_tools import IndiflightLog
 
+log = IndiflightLog("/path/to/log.bfl", logId=3)                                  # if multiple logs in the same logfile, use this to select the one you want. default 1
 log = IndiflightLog("/path/to/log.bfl", resetTime=False)                          # resetTime maintains the flight controller time as the time basis in the dataframe (default True)
 log = IndiflightLog("/path/to/log.bfl", resetTime=False, timeRange=(1000, 3000))  # crop the data to timeRange (given in ms)
 

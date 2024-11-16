@@ -24,6 +24,7 @@ from os import path
 if __name__=="__main__":
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument("logfile", metavar="x.BFL", help="BFL log to be converted")
+    parser.add_argument("-i", "--id", required=False, type=int, default=1, help="If multiple logs combined in one file, select this one.")
     parser.add_argument("-o", "--output-dir", required=False, type=str, default=None, help="Output Directory. If no passed, same directory as logfile.")
     parser.add_argument("-u", "--units", required=False, type=str, default="raw", help="raw or si")
     #parser.add_argument("-t", "--time-range", required=False, nargs=2, default=None, help="start and endtime in ms")
@@ -33,5 +34,5 @@ if __name__=="__main__":
 
     dir = args.output_dir if args.output_dir else path.dirname(args.logfile)
 
-    log = IndiflightLog(args.logfile, timeRange=None, resetTime=False)
+    log = IndiflightLog(args.logfile, logId=args.id, timeRange=None, resetTime=False)
     log.outputCsv(units=args.units, path=args.output_dir)

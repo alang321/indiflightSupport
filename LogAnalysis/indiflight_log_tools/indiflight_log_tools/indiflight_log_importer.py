@@ -22,6 +22,7 @@ import os
 import shutil
 import glob
 import re
+import json
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -136,7 +137,13 @@ class IndiflightLog(object):
         except TypeError:
             return single(bits)
 
-    def __init__(self, filename, timeRange=None, resetTime=True):
+    def __init__(self, filename, logId=1, timeRange=None, resetTime=True):
+        # check inputs
+        if logId < 1 or logId > 99:
+            raise ValueError(f"logId must be between 1 and 99. Was {logId}")
+
+        self.logIdStr = str(logId).zfill(2)
+
         # setup libary
         lib = ctypes.CDLL(self.LIBRARY_SO)
         lib.main.argtypes = (ctypes.c_int, ctypes.POINTER(ctypes.c_char_p))
@@ -152,9 +159,9 @@ class IndiflightLog(object):
                 os.remove(f)
 
         self.cache_bfl = os.path.join(cachedir, "log.bfl")
-        self.cache_csv = os.path.join(cachedir, "log.01.csv")
-        self.cache_events = os.path.join(cachedir, "log.01.event")
-        self.cache_headers_csv = os.path.join(cachedir, "log.01.headers.csv")
+        self.cache_csv = os.path.join(cachedir, f"log.{self.logIdStr}.csv")
+        self.cache_events = os.path.join(cachedir, f"log.{self.logIdStr}.event")
+        self.cache_headers_csv = os.path.join(cachedir, f"log.{self.logIdStr}.headers.csv")
 
         # copy to cache folder
         self.filename = filename
@@ -173,26 +180,37 @@ class IndiflightLog(object):
         self.raw.set_index('loopIteration', inplace=True)
 
         # get parameters
-        par_frame = pd.read_csv(
-            self.cache_headers_csv,
-            skiprows=13,
-            header=None,
-            usecols=[0, 1],
-            names=["parameter", "value"])
+        try:
+            par_frame = pd.read_csv(
+                self.cache_headers_csv,
+                skiprows=13,
+                header=None,
+                usecols=[0, 1],
+                names=["parameter", "value"])
 
-        self.parameters = par_frame.set_index("parameter")["value"].to_dict()
+            self.parameters = par_frame.set_index("parameter")["value"].to_dict()
+
+            # Attempt to convert each value in the dictionary to an integer if possible
+            for key, value in self.parameters.items():
+                try:
+                    self.parameters[key] = int(value)
+                except ValueError:
+                    pass  # Leave the value as a string if it can't be converted
+        except:
+            logger.error(f"No header file for log {self.logIdStr} in {self.filename}. Likely empty or corrupt log. Continuing")
+            open(self.cache_headers_csv, 'a').close() # create empty file
+            self.parameters = {}
 
         # get events
-        import json
-        with open(self.cache_events, 'r') as file:
-            self.events = [json.loads(line) for line in file]
+        try:
+            with open(self.cache_events, 'r') as file:
+                self.events = [json.loads(line) for line in file]
 
-        # Attempt to convert each value in the dictionary to an integer if possible
-        for key, value in self.parameters.items():
-            try:
-                self.parameters[key] = int(value)
-            except ValueError:
-                pass  # Leave the value as a string if it can't be converted
+        except FileNotFoundError:
+            logger.error(f"No event file for log {self.logIdStr} in {self.filename}. Likely empty or corrupt log. Continuing")
+            open(self.cache_events, 'a').close() # create empty file
+            self.events = []
+
 
         self.num_learner_vars = sum([
             re.match(r'^fx_p_rls_x\[[0-9]+\]$', c) is not None 
@@ -209,23 +227,26 @@ class IndiflightLog(object):
 
     def outputCsv(self, units: str, path=None):
         # copy csv back to folder if required
-        fileStem = os.path.splitext(self.filename)[0]
+        fileStem = os.path.splitext(os.path.basename(self.filename))[0]
         outputPath = path if path is not None else os.path.dirname(self.filename)
 
-        logger.warning("Outputting converted csv.")
+        if not os.path.exists(outputPath):
+            raise ValueError(f"CSV output path {outputPath} does not exist...")
+
+        logger.warning(f"Outputting converted csv to {outputPath}/")
 
         # always just copy headers and events
         shutil.copy(self.cache_headers_csv,
-            os.path.join(outputPath, fileStem+".01.headers.csv"))
+            os.path.join(outputPath, fileStem+f".{self.logIdStr}.headers.csv"))
         shutil.copy(self.cache_events,
-            os.path.join(outputPath, fileStem+".01.event"))
+            os.path.join(outputPath, fileStem+f".{self.logIdStr}.event"))
 
         if units.lower() == "raw":
             shutil.copy(self.cache_csv, 
-                os.path.join(outputPath, fileStem+".01.raw.csv"))
+                os.path.join(outputPath, fileStem+f".{self.logIdStr}.raw.csv"))
         elif units.lower() == "si":
             self.data.to_csv(
-                os.path.join(outputPath, fileStem+".01.si.csv"),
+                os.path.join(outputPath, fileStem+f".{self.logIdStr}.si.csv"),
                 #float_format="%.8e", # output with float precision, not double. this made the file even more huge
                 index=True
                 )

@@ -24,16 +24,6 @@ Indiflight logs.
 NOTE: All coordinate frames are either Forward-Right-Down or North-East-Down.
 
 
-### Decoding with `./indiflightLogTools`
+### Decoding with `./indiflight_log_tools`
 
-The python module `indiflightLogTools` provides a class that can decode 
-Betaflight/Indiflight logs and convert them to SI units.
-This way, you can build your own data analysis tools. 
-
-Conversion to `csv` is also possible, using the script `bfl2csv.py`.
-
-Install python requirements first:
-
-    pip install -r requirements.txt
-
-NOTE: All coordinate frames are either Forward-Right-Down or North-East-Down.
+Python package to convert and import the logs. See its readme.
