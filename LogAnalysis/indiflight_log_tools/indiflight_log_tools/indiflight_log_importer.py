@@ -319,9 +319,11 @@ class IndiflightLog(object):
         point3 = [ # in 3D view: (column, showTraceAsWell, markerSize)
             ("ekf_pos", True, 0.005),
             ("extPos", True, 0.01),
+            ("posSp", True, 0.01),
         ]
         arrow3 = [ # vectors: (direction, origin, lengthScaler)
-            ("ekf_vel", "ekf_pos", 0.2)
+            ("ekf_vel", "ekf_pos", 0.3),
+            ("velSp", "posSp", 0.3),
         ]
         pose = [ # show a triad to indicate pose (origin, rotationQuaternion)
             ("ekf_pos", "ekf_quat"),
