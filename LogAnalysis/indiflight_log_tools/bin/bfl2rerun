@@ -34,7 +34,7 @@ if __name__=="__main__":
 
     args = parser.parse_args()
 
-    rr.init("bfl2rerun", recording_id=args.recording_id, spawn=args.spawn)
+    rr.init("droneracing", recording_id=args.recording_id, spawn=args.spawn)
     rr.connect()
 
     log = IndiflightLog(args.logfile, logId=args.id, timeRange=None, resetTime=False)
