@@ -133,7 +133,7 @@ if __name__=="__main__":
 
 
     #%% initial conditions
-    mc.setPose(x=[1.5, -7., -0.1], q=[0.707, 0., 0., 0.707])
+    mc.setPose(x=[1.5, 2.5, -0.1], q=[0.707, 0., 0., 0.707])
     mc.setTwist(v=[0., 0., 0.], w=[0., 0., 0.])
 
     sim = Sim(mc, imu, mocap, hil, sil)
@@ -172,28 +172,25 @@ if __name__=="__main__":
             sil.mockup.arm() if sil else None
             sil.mockup.sendKeyboard('t') # takeoff
 
-        if not start_trajectory and sim.t > 5. and sil is not None:
-            # start trajectory tracking at 8*0.5 = 4m/s target speed
-            sil.mockup.sendKeyboard('1')
-            if sim.t > 7.:
-                for _ in range(10):
-                    sil.mockup.sendKeyboard('3')
+        if not start_trajectory and sim.t > 10. and sil is not None:
+            if sim.t > 11.:
+                sil.mockup.sendKeyboard('x')
                 start_trajectory = True
 
-        if not atRef and sim.t > 7. and sil is not None:
-            sil.mockup.sendKeyboard('r')
-            atRef = True
+        # if not atRef and sim.t > 7. and sil is not None:
+        #     sil.mockup.sendKeyboard('r')
+        #     atRef = True
 
-        if not atNothing and sim.t > 17. and sil is not None:
-            sil.mockup.sendKeyboard('g')
-            atRef = True
+        # if not atNothing and sim.t > 17. and sil is not None:
+        #     sil.mockup.sendKeyboard('g')
+        #     atRef = True
 
-        if not atVelocity and sim.t > 27. and sil is not None:
-            sil.mockup.sendKeyboard('v')
-            atVelocity = True
+        # if not atVelocity and sim.t > 27. and sil is not None:
+        #     sil.mockup.sendKeyboard('v')
+        #     atVelocity = True
 
-        if not atGates and sim.t > 37. and sil is not None:
-            sil.mockup.sendKeyboard('n')
-            atRef = True
+        # if not atGates and sim.t > 37. and sil is not None:
+        #     sil.mockup.sendKeyboard('n')
+        #     atRef = True
 
         sim.tick(dt)
